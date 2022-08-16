@@ -19,15 +19,6 @@ function tbt {
     current_mode_is_a2dp=`pactl list | grep Active | grep a2dp`
     card=`pactl list | grep "Name: bluez_card." | cut -d ' ' -f 2`
 
-
-    if zenity --question --icon-name=error --text="No bluetooth device found, Do you want to restart bluetooth?"
-    then
-        sudo systemctl restart bluetooth
-        exit
-    else
-        echo "User rejected"
-    fi
-
     #test if card is empty
     if [ -z "$card" ]; then
         if zenity --question --icon-name=error --text="No bluetooth device found, Do you want to restart bluetooth?"
