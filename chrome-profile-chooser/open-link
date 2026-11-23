@@ -1,0 +1,115 @@
+#!/usr/bin/python3
+"""Choose a Chrome profile for a desktop web link."""
+
+import json
+import os
+import sys
+from pathlib import Path
+
+import gi
+
+gi.require_version("Gtk", "3.0")
+gi.require_version("Gdk", "3.0")
+from gi.repository import Gdk, Gtk
+
+
+def choose_profile(profiles):
+    """Show a foreground chooser centered on the monitor containing the pointer."""
+    Gtk.Settings.get_default().set_property("gtk-application-prefer-dark-theme", True)
+    dialog = Gtk.Dialog(title="Choose a Chrome profile")
+    dialog.set_default_size(460, 330)
+    dialog.set_keep_above(True)
+    header = Gtk.HeaderBar(title=dialog.get_title(), show_close_button=True)
+    header.pack_start(Gtk.Image.new_from_icon_name("web-browser-symbolic", Gtk.IconSize.BUTTON))
+    dialog.set_titlebar(header)
+
+    styles = Gtk.CssProvider()
+    styles.load_from_data(b"""
+        window.background, dialog.background, viewport { background: #202327; color: #ecedf0; }
+        headerbar { background: #272b30; color: #ecedf0; border-bottom: 1px solid #41464d; }
+        list { background: transparent; }
+        row { padding: 8px 14px; margin: 2px 0; border-radius: 10px;
+              background: #30353b; border: 1px solid #41464d; color: #ecedf0; }
+        row:hover, row:focus { background: #394450; border-color: #8198ac; }
+        row .dim-label { color: #c0c6ce; opacity: 1; }
+        .avatar { border-radius: 24px; font-weight: bold; font-size: 17px; }
+        .violet { background: #50475e; color: #e3d5f3; }
+        .blue { background: #384e61; color: #cde4f6; }
+        .green { background: #384f47; color: #d0eadb; }
+        .amber { background: #584b39; color: #f1dfbf; }
+        .profile-name { font-size: 16px; font-weight: bold; }
+    """)
+    Gtk.StyleContext.add_provider_for_screen(
+        dialog.get_screen(), styles, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+    )
+    content = dialog.get_content_area()
+    content.set_border_width(14)
+    profiles_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+    directories = list(profiles)
+    colors = ("violet", "blue", "green", "amber")
+    for index, directory in enumerate(directories):
+        profile = profiles[directory]
+        account = profile.get("user_name") or directory
+        line = Gtk.Box(spacing=14)
+        avatar = Gtk.Label(label=(account[:1] or "?").upper())
+        avatar.set_size_request(42, 42)
+        avatar.set_valign(Gtk.Align.CENTER)
+        avatar.get_style_context().add_class("avatar")
+        avatar.get_style_context().add_class(colors[index % len(colors)])
+        line.pack_start(avatar, False, False, 0)
+        labels = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
+        name = Gtk.Label(label=profile["name"], xalign=0)
+        name.get_style_context().add_class("profile-name")
+        email = Gtk.Label(label=account, xalign=0)
+        email.get_style_context().add_class("dim-label")
+        labels.pack_start(name, False, False, 0)
+        labels.pack_start(email, False, False, 0)
+        line.pack_start(labels, True, True, 0)
+        arrow = Gtk.Image.new_from_icon_name("go-next-symbolic", Gtk.IconSize.MENU)
+        arrow.get_style_context().add_class("dim-label")
+        line.pack_end(arrow, False, False, 0)
+        profiles_list.add(line)
+    profiles_list.connect("row-activated", lambda _, row: dialog.response(row.get_index()))
+    scroll = Gtk.ScrolledWindow()
+    scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+    scroll.add(profiles_list)
+    content.pack_start(scroll, True, True, 0)
+
+    display = dialog.get_display()
+    _, x, y = display.get_default_seat().get_pointer().get_position()
+    area = display.get_monitor_at_point(x, y).get_workarea()
+    dialog.set_position(Gtk.WindowPosition.NONE)
+    dialog.show_all()
+    width, height = dialog.get_size()
+    dialog.move(area.x + (area.width - width) // 2, area.y + (area.height - height) // 2)
+    dialog.present_with_time(Gdk.CURRENT_TIME)
+    response = dialog.run()
+    dialog.destroy()
+    return directories[response] if response >= 0 else None
+
+
+def main():
+    """Launch the selected Chrome profile with the original URL."""
+    if len(sys.argv) != 2 or not sys.argv[1].lower().startswith(("http://", "https://")):
+        return 2
+    state = Path.home() / ".var/app/com.google.Chrome/config/google-chrome/Local State"
+    try:
+        profiles = json.loads(state.read_text())["profile"]["info_cache"]
+        if not profiles:
+            raise ValueError("No profiles")
+    except (OSError, ValueError, KeyError):
+        error = Gtk.MessageDialog(message_type=Gtk.MessageType.ERROR,
+                                  buttons=Gtk.ButtonsType.CLOSE,
+                                  text="Could not read your Chrome profiles.")
+        error.run()
+        error.destroy()
+        return 1
+    directory = choose_profile(profiles)
+    if directory:
+        os.execlp("flatpak", "flatpak", "run", "com.google.Chrome",
+                  f"--profile-directory={directory}", sys.argv[1])
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
